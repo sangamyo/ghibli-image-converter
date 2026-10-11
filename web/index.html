@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ghibli Image Converter</title>
+<meta name="description" content="Turn a photo into a Ghibli-inspired painting in your browser. Runs the AnimeGANv3 Hayao model on your device. Your photo is never uploaded." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #f4f1e8; --surface: #fffdf7; --surface-2: #ece7d9; --text: #1f2a24; --muted: #5d6a61;
+    --border: #ddd5c2; --accent: #2f7d5b; --accent-ink: #ffffff; --sky: #cfe6ef;
+    --shadow: 0 1px 2px rgb(40 30 10 / .06), 0 6px 20px rgb(40 30 10 / .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121613; --surface: #1a1f1b; --surface-2: #232a25; --text: #e9efe9; --muted: #9eaaa1;
+      --border: #2f3831; --accent: #6fcf9f; --accent-ink: #0b2016; --sky: #1d2b31; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px 16px 56px; }
+  h1 { margin: 0 0 6px; font-size: clamp(1.6rem, 1.15rem + 1.8vw, 2.3rem); letter-spacing: -.015em; }
+  .lead { margin: 0; color: var(--muted); max-width: 64ch; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+  .controls { margin-top: 22px; padding: 16px; display: grid; gap: 16px; }
+  .drop { border: 2px dashed var(--border); border-radius: 12px; padding: 22px 16px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--sky); }
+  .drop:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .drop strong { color: var(--accent); }
+  .drop small { display: block; color: var(--muted); margin-top: 4px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; }
+  .label { font-size: .82rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-right: 8px; }
+  .samples { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .samples button { appearance: none; padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; background: none; width: 72px; height: 48px; }
+  .samples button:hover, .samples button:focus-visible { border-color: var(--accent); }
+  .samples img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .seg button { appearance: none; border: 0; background: var(--surface); color: var(--text); font: inherit; font-size: .9rem; padding: 7px 12px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .result { margin-top: 16px; overflow: hidden; }
+  .compare { position: relative; background: var(--surface-2); user-select: none; touch-action: none; }
+  .compare canvas { display: block; width: 100%; height: auto; }
+  .compare .before { position: absolute; inset: 0; clip-path: inset(0 calc(100% - var(--split, 50%)) 0 0); }
+  .compare .handle { position: absolute; top: 0; bottom: 0; left: var(--split, 50%); width: 2px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / .25); translate: -1px 0; pointer-events: none; }
+  .compare .handle::after { content: "⇆"; position: absolute; top: 50%; left: 50%; translate: -50% -50%; width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #222;
+                            display: grid; place-items: center; font-size: 16px; box-shadow: 0 2px 8px rgb(0 0 0 / .3); }
+  .tag { position: absolute; top: 10px; padding: 3px 9px; border-radius: 999px; background: rgb(0 0 0 / .55); color: #fff; font-size: .78rem; pointer-events: none; }
+  .tag.l { left: 10px; } .tag.r { right: 10px; }
+  .placeholder { aspect-ratio: 3 / 2; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 16px; }
+  .bar { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); }
+  .status { font-size: .9rem; color: var(--muted); }
+  .status.err { color: #c0392b; }
+  .btn { appearance: none; border: 0; background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 10px; cursor: pointer; text-decoration: none; }
+  .btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+  footer { margin-top: 28px; font-size: .84rem; color: var(--muted); display: grid; gap: 6px; }
+  footer a, .lead a { color: var(--accent); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ghibli Image Converter</h1>
+  <p class="lead">Turn a photo into a hand-painted, Ghibli-inspired scene. The AnimeGANv3 “Hayao” model runs right here in your browser, so your photo is never uploaded.
+    <a href="https://github.com/sangamyo/ghibli-image-converter">Source on GitHub</a></p>
+
+  <section class="card controls" aria-label="Choose a photo">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="image/*" class="sr-only" />
+      <strong>Choose a photo</strong> or drop it here
+      <small>JPG, PNG or WebP · landscapes and streets work best</small>
+    </label>
+    <div class="row">
+      <div class="samples"><span class="label">Samples</span>
+        <button type="button" data-src="samples/lake.jpg" aria-label="Mountain lake sample"><img src="samples/lake.jpg" alt="" loading="lazy" /></button>
+        <button type="button" data-src="samples/urbino.jpg" aria-label="Hills at sunset sample"><img src="samples/urbino.jpg" alt="" loading="lazy" /></button>
+        <button type="button" data-src="samples/street.jpg" aria-label="Street sample"><img src="samples/street.jpg" alt="" loading="lazy" /></button>
+      </div>
+      <div><span class="label">Style</span>
+        <span class="seg" role="group" aria-label="Style strength">
+          <button type="button" data-side="512" aria-pressed="false">Strong</button>
+          <button type="button" data-side="768" aria-pressed="true">Balanced</button>
+          <button type="button" data-side="1024" aria-pressed="false">Detailed</button>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card result" aria-label="Result">
+    <div class="placeholder" id="placeholder">Pick a sample or upload a photo to see it painted.</div>
+    <div class="compare" id="compare" hidden>
+      <canvas id="after" aria-label="Converted image"></canvas>
+      <canvas id="before" class="before" aria-label="Original image"></canvas>
+      <div class="handle"></div>
+      <span class="tag l">Original</span><span class="tag r">Ghibli style</span>
+    </div>
+    <div class="bar">
+      <span class="status" id="status" role="status">The model (4 MB) loads when you pick a photo.</span>
+      <a class="btn" id="download" download="ghibli.png" aria-disabled="true">↓ Download PNG</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>Model: <a href="https://github.com/TachibanaYoshino/AnimeGANv3">AnimeGANv3</a> (Hayao style) by Asher Chan, used under its non-commercial license. Runs with <a href="https://onnxruntime.ai/">ONNX Runtime Web</a>.</span>
+    <span>Sample photos: public domain (CC0) from Wikimedia Commons. “Ghibli-inspired” describes the look; not affiliated with Studio Ghibli.</span>
+  </footer>
+</main>
+
+<script type="module">
+const ORT_VERSION = '1.29.0'
+const MODEL_URL = 'models/AnimeGANv3_Hayao_36.onnx'
+const MAX_ORIGINAL = 4096       // cap on the full-size download, to keep memory sane on phones
+
+const $ = (id) => document.getElementById(id)
+const status = (text, { busy = false, error = false } = {}) => {
+  const el = $('status')
+  el.classList.toggle('err', error)
+  el.innerHTML = (busy ? '<span class="spinner" aria-hidden="true"></span>' : '') + text
+}
+
+let maxSide = 768
+let currentBitmap = null
+let sessionPromise = null
+let backend = ''
+let busy = false
+
+/* ---------- model ---------- */
+async function loadSession() {
+  const gpu = 'gpu' in navigator
+  const ort = await import(`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/${gpu ? 'ort.webgpu.min.mjs' : 'ort.wasm.min.mjs'}`)
+  ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`
+  if (!crossOriginIsolated) ort.env.wasm.numThreads = 1   // threads need COOP/COEP headers, which GitHub Pages can't send
+  const model = await fetch(MODEL_URL).then((r) => { if (!r.ok) throw new Error(`model download failed (${r.status})`); return r.arrayBuffer() })
+  if (gpu) {
+    try {
+      // logSeverityLevel 3 = errors only; hides the harmless "some nodes run on CPU" notice
+      const session = await ort.InferenceSession.create(model, { executionProviders: ['webgpu'], logSeverityLevel: 3 })
+      backend = 'WebGPU'
+      return { ort, session }
+    } catch (err) {
+      console.warn('WebGPU unavailable, using WebAssembly', err)
+    }
+  }
+  const session = await ort.InferenceSession.create(model, { executionProviders: ['wasm'], logSeverityLevel: 3 })
+  backend = 'WebAssembly'
+  return { ort, session }
+}
+
+/* ---------- same maths as ghibli_converter/core.py ---------- */
+function modelSize(w, h, cap) {
+  if (cap && Math.max(w, h) > cap) {
+    const s = cap / Math.max(w, h)
+    w = Math.round(w * s); h = Math.round(h * s)
+  }
+  const snap = (x) => (x < 256 ? 256 : x - (x % 8))
+  return [snap(w), snap(h)]
+}
+
+async function convert() {
+  if (!currentBitmap || busy) return
+  busy = true
+  $('download').setAttribute('aria-disabled', 'true')
+  try {
+    if (!sessionPromise) {
+      status('Loading the model (first time only)…', { busy: true })
+      sessionPromise = loadSession()
+    }
+    const { ort, session } = await sessionPromise
+    const bmp = currentBitmap
+    const [w, h] = modelSize(bmp.width, bmp.height, maxSide)
+    status(`Painting at ${w}×${h} on ${backend}…`, { busy: true })
+    await new Promise(requestAnimationFrame)   // let the status paint before the heavy work
+
+    // pixels -> NHWC float32 in [-1, 1]
+    const work = new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true })
+    work.drawImage(bmp, 0, 0, w, h)
+    const { data } = work.getImageData(0, 0, w, h)
+    const input = new Float32Array(w * h * 3)
+    for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+      input[j] = data[i] / 127.5 - 1
+      input[j + 1] = data[i + 1] / 127.5 - 1
+      input[j + 2] = data[i + 2] / 127.5 - 1
+    }
+    const t0 = performance.now()
+    const feeds = { [session.inputNames[0]]: new ort.Tensor('float32', input, [1, h, w, 3]) }
+    const output = (await session.run(feeds))[session.outputNames[0]]
+    const ms = performance.now() - t0
+    const out = output.data
+    const pixels = new ImageData(w, h)
+    for (let i = 0, j = 0; j < out.length; i += 4, j += 3) {
+      pixels.data[i] = (out[j] + 1) * 127.5
+      pixels.data[i + 1] = (out[j + 1] + 1) * 127.5
+      pixels.data[i + 2] = (out[j + 2] + 1) * 127.5
+      pixels.data[i + 3] = 255
+    }
+    output.dispose?.()
+    show(bmp, pixels)
+    status(`Done in ${(ms / 1000).toFixed(1)} s on ${backend} · drag the slider to compare`)
+  } catch (err) {
+    console.error(err)
+    sessionPromise = null
+    status(`Something went wrong: ${err.message || err}`, { error: true })
+  } finally {
+    busy = false
+  }
+}
+
+/* ---------- display + download ---------- */
+function show(bmp, pixels) {
+  // Display and download at the photo's own size (capped), like the CLI's default.
+  const scale = Math.min(1, MAX_ORIGINAL / Math.max(bmp.width, bmp.height))
+  const W = Math.round(bmp.width * scale), H = Math.round(bmp.height * scale)
+  const small = new OffscreenCanvas(pixels.width, pixels.height)
+  small.getContext('2d').putImageData(pixels, 0, 0)
+  const after = $('after'), before = $('before')
+  for (const c of [after, before]) { c.width = W; c.height = H }
+  const actx = after.getContext('2d')
+  actx.imageSmoothingQuality = 'high'
+  actx.drawImage(small, 0, 0, W, H)
+  before.getContext('2d').drawImage(bmp, 0, 0, W, H)
+  $('placeholder').hidden = true
+  $('compare').hidden = false
+  after.toBlob((blob) => {
+    const link = $('download')
+    if (link.href) URL.revokeObjectURL(link.href)
+    link.href = URL.createObjectURL(blob)
+    link.setAttribute('aria-disabled', 'false')
+  }, 'image/png')
+}
+
+/* ---------- inputs ---------- */
+async function useBlob(blob, name = 'photo') {
+  try {
+    currentBitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' })
+  } catch {
+    return status("That file doesn't look like an image this browser can read.", { error: true })
+  }
+  $('download').download = `${name.replace(/\.[^.]+$/, '')}_ghibli.png`
+  convert()
+}
+$('file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) useBlob(f, f.name); e.target.value = '' })
+const drop = $('drop')
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over') })
+drop.addEventListener('dragleave', () => drop.classList.remove('over'))
+drop.addEventListener('drop', (e) => {
+  e.preventDefault(); drop.classList.remove('over')
+  const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'))
+  if (f) useBlob(f, f.name)
+})
+for (const b of document.querySelectorAll('.samples button')) {
+  b.addEventListener('click', async () => {
+    const src = b.dataset.src
+    useBlob(await fetch(src).then((r) => r.blob()), src.split('/').pop())
+  })
+}
+for (const b of document.querySelectorAll('.seg button')) {
+  b.addEventListener('click', () => {
+    maxSide = Number(b.dataset.side)
+    for (const o of document.querySelectorAll('.seg button')) o.setAttribute('aria-pressed', String(o === b))
+    convert()
+  })
+}
+
+/* ---------- before/after slider ---------- */
+const compare = $('compare')
+const setSplit = (clientX) => {
+  const r = compare.getBoundingClientRect()
+  compare.style.setProperty('--split', `${Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100))}%`)
+}
+compare.addEventListener('pointerdown', (e) => { compare.setPointerCapture(e.pointerId); setSplit(e.clientX) })
+compare.addEventListener('pointermove', (e) => { if (compare.hasPointerCapture(e.pointerId)) setSplit(e.clientX) })
+</script>
+</body>
+</html>
